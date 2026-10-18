@@ -101,13 +101,13 @@ Contracter enforces **zero-network privacy** by design:
 
 ## 🖥️ Hardware Requirements
 
-| Component | Minimum | Recommended |
-|-----------|---------|-------------|
-| GPU | NVIDIA GTX 1060 (6GB) | NVIDIA RTX 5070 Ti (12GB) |
-| CPU | Intel Core i7 | Intel Core Ultra 9 |
-| RAM | 16 GB | 32 GB |
-| Storage | 20 GB free | 50 GB free |
-| OS | Linux (tested on Fedora) | Linux with NVIDIA drivers |
+| Component | Minimum                  | Recommended               |
+|-----------|--------------------------|---------------------------|
+| GPU       | NVIDIA GTX 1060 (6GB)    | NVIDIA RTX 5070 Ti (12GB) |
+| CPU       | Intel Core i7            | Intel Core Ultra 9        |
+| RAM       | 16 GB                    | 32 GB                     |
+| Storage   | 20 GB free               | 50 GB free                |
+| OS        | Linux (tested on Fedora) | Linux with NVIDIA drivers |
 
 ---
 
@@ -123,8 +123,8 @@ Contracter enforces **zero-network privacy** by design:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/contracter.git
-cd contracter
+git clone https://github.com/ZERODAY-2026/Octopus.git
+cd Octopus
 
 # Pull the Gemma 3n E4B model
 ollama pull gemma3n:e4b
@@ -183,15 +183,15 @@ uv run pytest -m "not slow"  # fast unit tests only
 
 ### Test Modules
 
-| Module | What it covers |
-|--------|----------------|
-| `tests/test_metrics.py` | Metric maths: faithfulness, relevancy, recall/precision, MRR, nDCG, citation checks. |
-| `tests/test_citations.py` | Verbatim citation anchoring, repaired matches, rejection of unverifiable quotes. |
-| `tests/test_privacy.py` | The whole pipeline with the network disabled; proves zero outbound attempts. |
-| `tests/test_retrieval_integration.py` | CUAD-style retrieval, chunk provenance, clause mapping and the citation guarantee. |
-| `tests/test_adversarial.py` | Malformed input, vague contracts, prompt injection and system-prompt disclosure. |
-| `tests/test_clauses.py` | Canonical clause-type normalization   (aliases, compound labels, one finding per category, withholding findings on a refusal). |
-| `tests/test_evaluation_harness.py` | Threshold selection, aggregation, reporting and dataset loading. |
+| Module                                | What it covers                                                                                                                 |
+|---------------------------------------|--------------------------------------------------------------------------------------------------------------------------------|
+| `tests/test_metrics.py`               | Metric maths: faithfulness, relevancy, recall/precision, MRR, nDCG, citation checks.                                           |
+| `tests/test_citations.py`             | Verbatim citation anchoring, repaired matches, rejection of unverifiable quotes.                                               |
+| `tests/test_privacy.py`               | The whole pipeline with the network disabled; proves zero outbound attempts.                                                   |
+| `tests/test_retrieval_integration.py` | CUAD-style retrieval, chunk provenance, clause mapping and the citation guarantee.                                             |
+| `tests/test_adversarial.py`           | Malformed input, vague contracts, prompt injection and system-prompt disclosure.                                               |
+| `tests/test_clauses.py`               | Canonical clause-type normalization   (aliases, compound labels, one finding per category, withholding findings on a refusal). |
+| `tests/test_evaluation_harness.py`    | Threshold selection, aggregation, reporting and dataset loading.                                                               |
 
 ### Privacy Validation
 
@@ -226,17 +226,17 @@ uv run python scripts/run_evaluation.py --judge --model gemma3n:e4b
 The metric set follows the RAGAS paper (*Es et al., arXiv:2309.15217*) together
 with the standard retrieval metrics:
 
-| Metric | Question it answers |
-|--------|---------------------|
-| `faithfulness` (groundedness) | Is every claim in the answer supported by the retrieved excerpts? |
-| `answer_relevancy` | Does the answer actually address the question? |
-| `context_relevance` | Are the retrieved excerpts on topic? |
-| `context_precision` | Are the relevant excerpts ranked first? |
-| `context_recall` | Did retrieval cover the reference answer? |
-| `answer_correctness` | Precision / recall / F1 against the reference answer. |
-| `retrieval_hit_rate`, `retrieval_recall`, `retrieval_precision`, `retrieval_mrr`, `retrieval_ndcg` | Is the retrieval half of the pipeline healthy? |
-| `citation_grounding_rate`, `citation_locator_accuracy`, `citation_offset_accuracy` | Do citations appear verbatim, on the right page, at the right offsets? |
-| `abstention_recall`, `over_abstention_rate`, `fabricated_clause_rate` | Is calibrated uncertainty working? |
+| Metric                                                                                             | Question it answers                                                    |
+|----------------------------------------------------------------------------------------------------|------------------------------------------------------------------------|
+| `faithfulness` (groundedness)                                                                      | Is every claim in the answer supported by the retrieved excerpts?      |
+| `answer_relevancy`                                                                                 | Does the answer actually address the question?                         |
+| `context_relevance`                                                                                | Are the retrieved excerpts on topic?                                   |
+| `context_precision`                                                                                | Are the relevant excerpts ranked first?                                |
+| `context_recall`                                                                                   | Did retrieval cover the reference answer?                              |
+| `answer_correctness`                                                                               | Precision / recall / F1 against the reference answer.                  |
+| `retrieval_hit_rate`, `retrieval_recall`, `retrieval_precision`, `retrieval_mrr`, `retrieval_ndcg` | Is the retrieval half of the pipeline healthy?                         |
+| `citation_grounding_rate`, `citation_locator_accuracy`, `citation_offset_accuracy`                 | Do citations appear verbatim, on the right page, at the right offsets? |
+| `abstention_recall`, `over_abstention_rate`, `fabricated_clause_rate`                              | Is calibrated uncertainty working?                                     |
 
 There are two execution modes. **Judged mode** (`--judge`) uses the local Ollama
 model to decompose answers into claims and verify them, exactly as RAGAS does.
@@ -356,15 +356,15 @@ Check system health (Ollama, ChromaDB, GPU status).
 
 ## 🛠️ Tech Stack
 
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| LLM | Ollama + Gemma 3n E4B | Local inference on GPU |
-| Backend | Python 3.14 + FastAPI | REST API server |
-| Frontend | Streamlit | Interactive web interface |
-| Vector DB | ChromaDB | Local persistent storage |
-| Embeddings | sentence-transformers | On-device embedding generation |
-| PDF Parsing | pdfplumber | Text and layout extraction |
-| Testing | pytest | Unit, integration, and security tests |
+| Component   | Technology            | Purpose                               |
+|-------------|-----------------------|---------------------------------------|
+| LLM         | Ollama + Gemma 3n E4B | Local inference on GPU                |
+| Backend     | Python 3.14 + FastAPI | REST API server                       |
+| Frontend    | Streamlit             | Interactive web interface             |
+| Vector DB   | ChromaDB              | Local persistent storage              |
+| Embeddings  | sentence-transformers | On-device embedding generation        |
+| PDF Parsing | pdfplumber            | Text and layout extraction            |
+| Testing     | pytest                | Unit, integration, and security tests |
 
 ---
 
