@@ -65,7 +65,7 @@ Contracter enforces **zero-network privacy** by design:
 
 ### Core Analysis
 - **Clause Extraction**: Automatically identifies obligations, deadlines, penalties,
-  and termination conditions.
+  and termination conditions, mapped onto one canonical clause vocabulary.
 - **Plain-Language Summaries**: Complex legal language translated into readable English.
 - **Citation Tracking**: Every summary maps to exact quoted passages with page number
   and character offset references.
@@ -74,6 +74,8 @@ Contracter enforces **zero-network privacy** by design:
 ### Calibrated Uncertainty
 - Explicitly states when a document **is silent** on a queried topic.
 - Refuses to invent or speculate on unsupported conclusions.
+- Withholds clause findings when the answer itself is a refusal, so a finding can
+  never be presented beside a "the document is silent" statement.
 - Example: *"The contract specifies a 30-day notice period but is silent on whether
   notice must be delivered by email or physical letter."*
 
@@ -188,6 +190,7 @@ uv run pytest -m "not slow"  # fast unit tests only
 | `tests/test_privacy.py` | The whole pipeline with the network disabled; proves zero outbound attempts. |
 | `tests/test_retrieval_integration.py` | CUAD-style retrieval, chunk provenance, clause mapping and the citation guarantee. |
 | `tests/test_adversarial.py` | Malformed input, vague contracts, prompt injection and system-prompt disclosure. |
+| `tests/test_clauses.py` | Canonical clause-type normalization   (aliases, compound labels, one finding per category, withholding findings on a refusal). |
 | `tests/test_evaluation_harness.py` | Threshold selection, aggregation, reporting and dataset loading. |
 
 ### Privacy Validation
@@ -239,7 +242,39 @@ There are two execution modes. **Judged mode** (`--judge`) uses the local Ollama
 model to decompose answers into claims and verify them, exactly as RAGAS does.
 **Lexical mode** is a deterministic token/number-overlap approximation that needs
 no model, so it runs in CI and inside the network-disabled privacy tests. Each
-mode has its own documented threshold set.
+mode has its own documented threshold set; both compute and report *every*
+metric, and each threshold carries a comment recording why it sits where it does.
+
+### Threshold Calibration
+
+Thresholds are targets for a competent *local* pipeline, not the headline
+numbers from papers that assume a frontier judge. Three are deliberately looser
+than the literature, each for a structural reason recorded beside the constant:
+
+- `answer_relevancy` → **0.65** judged. RAGAS itself cites ~0.75 with a strong
+  judge, but here a 4B model writes the reverse question and the score is an
+  embedding distance.
+- `context_relevance` → **0.30** judged. This is a per-chunk mean, so with
+  `k=5` retrieved excerpts and ~2 relevant clauses the arithmetic ceiling is
+  ~0.4 however good retrieval is; `retrieval_precision@R` above is the metric
+  that actually isolates retrieval quality.
+- `answer_clause_type_accuracy` → **0.45**. The metric is recall over the clause
+  categories a question touches, and a question spanning a notice *deadline* and
+  the *termination* right it serves is credited half when the model reports one
+  category. The metric's maths is asserted directly by unit tests.
+
+When the evaluator is handed a non-semantic (bag-of-words) embedder,
+`answer_relevancy` is still computed and reported but **never gated**, because
+such an embedder cannot recognise that a correct paraphrase is on topic.
+
+### Canonical Clause Vocabulary
+
+A model labels clauses inconsistently — `"obligation | penalty | termination"`,
+`"term_and_termination"`, `"Limitation of Liability"` all describe one finding
+worth of text. `app/parsing/clauses.py` owns a single canonical vocabulary,
+splits compound labels, folds aliases onto their category and emits one finding
+per category, so a compound label can no longer read as one unrecognized string
+in the interface *or* score as a miss in evaluation.
 
 ### Verifiable Citations by Construction
 
@@ -348,7 +383,9 @@ contracter/
 │   ├── models.py              # Pydantic data models
 │   ├── parsing/
 │   │   ├── extractor.py       # PDF/TXT extraction and chunking
-│   │   └── citations.py       # Verbatim citation anchoring
+│   │   ├── citations.py       # Verbatim citation anchoring
+│   │   ├── clauses.py         # Canonical clause-type vocabulary
+│   │   └── abstention.py      # Calibrated-uncertainty detection
 │   ├── embeddings/
 │   │   ├── engine.py          # sentence-transformers engine
 │   │   └── deterministic.py   # Offline hashing embedder (tests/CI)
@@ -379,6 +416,7 @@ contracter/
 │   ├── test_privacy.py        # Offline network-disabled tests
 │   ├── test_retrieval_integration.py  # CUAD-style integration tests
 │   ├── test_adversarial.py    # Adversarial security tests
+│   ├── test_clauses.py        # Clause-type normalization and withholding
 │   ├── test_evaluation_harness.py     # Harness and reporting tests
 │   └── sample_documents/
 │       ├── ground_truth.jsonl # CUAD-style evaluation dataset

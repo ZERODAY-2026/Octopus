@@ -30,11 +30,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   non-loopback connection attempts (target: zero).
 - **Test suite**: metric-maths tests, citation-anchoring tests, zero-network
   privacy tests, CUAD-style retrieval/clause-mapping integration tests,
-  adversarial tests (malformed input, vague contracts, prompt injection,
-  system-prompt disclosure) and evaluation-harness tests.
+  clause-vocabulary tests, adversarial tests (malformed input, vague contracts,
+  prompt injection, system-prompt disclosure) and evaluation-harness tests.
 - **Adversarial hardening**: excerpt labels and self-citation sentences are
   stripped from model prose, and a reply that echoes the system instructions is
   discarded rather than shown.
+- **Canonical clause vocabulary** (`app/parsing/clauses.py`): compound and
+  aliased model labels (`"obligation | penalty | termination"`,
+  `"term_and_termination"`, `"Limitation of Liability"`) are split and folded
+  onto one canonical set, and a compound label yields one finding per category.
+- **Shared abstention detector** (`app/parsing/abstention.py`): one definition of
+  what a calibrated refusal looks like, read by both the pipeline and the
+  evaluation harness.
 
 ### Changed
 
@@ -45,12 +52,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   numbers, offsets) from appearing in answers.
 - ChromaDB telemetry is disabled explicitly rather than relying on the installed
   release's default being quiet.
+- A refusal no longer carries clause findings: when the answer reports the
+  document is silent, `TriagePipeline` withholds the clauses the model noticed
+  nearby and says so, because a clause finding is a claim and must not sit beside
+  a refusal. The system prompt now asks the model for an empty `clauses` array in
+  that case.
+- **Evaluation thresholds are documented and calibrated for a local pipeline.**
+  Each threshold constant carries the reason it sits where it does. Three are
+  looser than the literature's headline numbers for structural reasons:
+  `answer_relevancy` 0.65 (local 4B judge + embedding distance),
+  `context_relevance` 0.30 (a per-chunk mean whose ceiling is set by `k=5`), and
+  `answer_clause_type_accuracy` 0.45 (recall over the categories a question
+  touches). When the evaluator is given a non-semantic embedder,
+  `answer_relevancy` is computed and reported but not gated.
 
 ### Fixed
 
 - Faithfulness no longer penalises a calibrated refusal that contains content
   words: a sentence that only reports document silence is not treated as a
   document claim.
+- `answer_clause_type_accuracy` no longer scores an aliased or compound clause
+  label as a miss: both the produced and the expected labels are normalized to
+  the canonical vocabulary before comparison.
 
 ## [1.0.0] — 2026-10-18
 

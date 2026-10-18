@@ -86,6 +86,47 @@ def test_custom_thresholds_override_defaults() -> None:
     assert evaluator.thresholds["faithfulness"] == 0.42
 
 
+def test_judged_mode_does_not_gate_answer_relevancy_with_a_lexical_embedder() -> None:
+    from app.embeddings.deterministic import OfflineHashingEmbedder
+
+    evaluator = RAGEvaluator(
+        judge=LLMJudge(RelevanceJudgeLLM()), embedder=OfflineHashingEmbedder()
+    )
+    # A bag-of-words embedder cannot judge semantic relevance, so the metric is
+    # reported but never gated.
+    assert "answer_relevancy" not in evaluator.thresholds
+    assert evaluator.embedder_is_deterministic is True
+
+
+def test_judged_mode_gates_answer_relevancy_with_a_semantic_embedder() -> None:
+    class _SemanticEmbedder:
+        is_deterministic = False
+
+    evaluator = RAGEvaluator(judge=LLMJudge(RelevanceJudgeLLM()), embedder=_SemanticEmbedder())
+    assert evaluator.thresholds["answer_relevancy"] == DEFAULT_THRESHOLDS["answer_relevancy"]
+
+
+def test_explicit_threshold_survives_the_deterministic_embedder_rule() -> None:
+    from app.embeddings.deterministic import OfflineHashingEmbedder
+
+    evaluator = RAGEvaluator(
+        judge=LLMJudge(RelevanceJudgeLLM()),
+        embedder=OfflineHashingEmbedder(),
+        thresholds={"answer_relevancy": 0.5},
+    )
+    assert evaluator.thresholds["answer_relevancy"] == 0.5
+
+
+def test_clause_type_accuracy_credits_canonical_and_compound_labels() -> None:
+    evaluator = RAGEvaluator()
+    sample = SAMPLE.model_copy(update={"relevant_clause_types": ["deadline", "termination"]})
+    prediction = _prediction(clause_types=["term_and_termination | deadline"])
+    result = run_async(evaluator.evaluate_sample(sample, prediction))
+    # "term_and_termination" folds onto "termination", so both expected
+    # categories are covered despite the compound, aliased label.
+    assert result.metrics["answer_clause_type_accuracy"] == 1.0
+
+
 # ---------------------------------------------------------------------------
 # Per-sample scoring
 # ---------------------------------------------------------------------------
