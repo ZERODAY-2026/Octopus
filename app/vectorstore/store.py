@@ -14,6 +14,7 @@ from chromadb.config import Settings as ChromaSettings
 
 from app.embeddings.engine import EmbeddingEngine
 from app.models import DocumentChunk, RetrievedChunk
+from app.retrieval.lexical import BM25Index, expand_query, reciprocal_rank_fusion
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,8 @@ class VectorStore:
         )
         self.embedding_engine = embedding_engine
         self.embedding_function = ChromaEmbeddingAdapter(embedding_engine)
+        # BM25 indexes are rebuilt only when a collection's size changes.
+        self._bm25_cache: dict[str, tuple[int, BM25Index, list[dict[str, Any]]]] = {}
 
     @staticmethod
     def _sanitize_collection_name(document_id: str) -> str:
@@ -115,7 +118,7 @@ class VectorStore:
         collection = self.client.get_or_create_collection(
             name=collection_name,
             embedding_function=self.embedding_function,
-            metadata={"original_document_id": document_id},
+            metadata={"original_document_id": document_id, "hnsw:space": "cosine"},
         )
 
         batch_size = 500
@@ -142,21 +145,43 @@ class VectorStore:
             collection_name,
         )
 
+    def _lexical_index(self, collection: Any, collection_name: str) -> tuple[BM25Index, list[dict[str, Any]]]:
+        """Return (BM25 index, rows) for a collection, cached by chunk count."""
+        count = collection.count()
+        cached = self._bm25_cache.get(collection_name)
+        if cached and cached[0] == count:
+            return cached[1], cached[2]
+        data = collection.get(include=["documents", "metadatas"])
+        rows = [
+            {"chunk_id": cid, "content": doc, "metadata": meta or {}}
+            for cid, doc, meta in zip(data.get("ids") or [], data.get("documents") or [], data.get("metadatas") or [])
+        ]
+        index = BM25Index([r["content"] for r in rows])
+        self._bm25_cache[collection_name] = (count, index, rows)
+        return index, rows
+
     def query(
         self,
         document_id: str,
         query_text: str,
         n_results: int = 5,
+        hybrid: bool = True,
     ) -> list[dict[str, Any]]:
-        """Retrieve the top-k most relevant chunks for a user query.
+        """Retrieve the top-k chunks using dense + BM25 search fused with RRF.
+
+        The dense leg embeds the raw question; the lexical leg searches the
+        question *plus* legal synonyms (see ``expand_query``) so that a question
+        such as "termination date" reaches a clause worded "remain in effect
+        until terminated ... upon thirty (30) days' prior written notice".
 
         Args:
             document_id: Target document identifier.
             query_text: Natural language query string.
             n_results: Maximum number of chunks to return.
+            hybrid: Disable to get dense-only results (used for ablations).
 
         Returns:
-            List of dictionaries containing 'content', 'metadata', and 'distance'.
+            List of dictionaries containing 'chunk_id', 'content', 'metadata', 'distance'.
         """
         collection_name = self._sanitize_collection_name(document_id)
 
@@ -173,31 +198,68 @@ class VectorStore:
         if total_count == 0:
             return []
 
-        actual_n = min(n_results, total_count)
+        dense_k = min(max(n_results * 4, 20) if hybrid else n_results, total_count)
         raw_results = collection.query(
             query_texts=[query_text],
-            n_results=actual_n,
+            n_results=dense_k,
             include=["documents", "metadatas", "distances"],
         )
 
-        output: list[dict[str, Any]] = []
-        ids = raw_results.get("ids", [[]])[0] if raw_results.get("ids") else []
-        docs = raw_results.get("documents", [[]])[0] if raw_results.get("documents") else []
-        metas = raw_results.get("metadatas", [[]])[0] if raw_results.get("metadatas") else []
-        dists = raw_results.get("distances", [[]])[0] if raw_results.get("distances") else []
+        dense: list[dict[str, Any]] = []
+        ids = (raw_results.get("ids") or [[]])[0]
+        docs = (raw_results.get("documents") or [[]])[0]
+        metas = (raw_results.get("metadatas") or [[]])[0]
+        dists = (raw_results.get("distances") or [[]])[0]
 
         for position, (doc, meta, dist) in enumerate(zip(docs, metas, dists)):
             chunk_id = ids[position] if position < len(ids) else f"chunk_{position}"
-            output.append(
-                {
-                    "chunk_id": chunk_id,
-                    "content": doc,
-                    "metadata": meta,
-                    "distance": dist,
-                }
-            )
+            dense.append({"chunk_id": chunk_id, "content": doc, "metadata": meta, "distance": dist})
 
-        return output
+        if not hybrid:
+            return dense[:n_results]
+
+        index, rows = self._lexical_index(collection, collection_name)
+        lexical_ranked = index.rank(expand_query(query_text), top_n=dense_k)
+        by_id: dict[str, dict[str, Any]] = {d["chunk_id"]: d for d in dense}
+        lexical_ids: list[str] = []
+        for row_idx, _score in lexical_ranked:
+            row = rows[row_idx]
+            lexical_ids.append(row["chunk_id"])
+            by_id.setdefault(row["chunk_id"], {**row, "distance": None})
+
+        fused = reciprocal_rank_fusion([[d["chunk_id"] for d in dense], lexical_ids])
+        return [by_id[cid] for cid, _ in fused[:n_results]]
+
+    def query_many(
+            self,
+            document_ids: list[str],
+            query_text: str,
+            n_results: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Run ``query`` over several documents; each hit carries its document id.
+
+        Hits are interleaved round-robin so every document is represented
+        before any document contributes a second hit.
+        """
+        per_doc = [
+            [{**hit, "document_id": doc_id} for hit in self.query(doc_id, query_text, n_results)]
+            for doc_id in document_ids
+        ]
+        merged: list[dict[str, Any]] = []
+        for rank in range(n_results):
+            for hits in per_doc:
+                if rank < len(hits):
+                    merged.append(hits[rank])
+        return merged[: max(n_results, len(document_ids))]
+
+    def get_text(self, document_id: str) -> str:
+        """Full text of a document (chunks in order); used for name checks."""
+        return "\n".join(c.content for c in self.fetch_all(document_id))
+
+    def get_filename(self, document_id: str) -> str:
+        """Original filename recorded in chunk metadata, or the id if unknown."""
+        chunks = self.fetch_all(document_id)
+        return chunks[0].source_file if chunks and chunks[0].source_file else document_id
 
     def fetch_all(self, document_id: str) -> list[RetrievedChunk]:
         """Fetch every stored chunk for a document, ordered by chunk index.

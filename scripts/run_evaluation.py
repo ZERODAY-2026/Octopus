@@ -54,6 +54,10 @@ DOCUMENTS: dict[str, str] = {
     "sparse_agreement": "sparse_agreement.txt",
 }
 
+#: slug -> file path actually ingested. Defaults to the committed samples; replaced
+#: by ``--docs-map`` (written by scripts/prepare_cuad.py) for a CUAD evaluation.
+DOC_PATHS: dict[str, Path] = {slug: SAMPLE_DIR / name for slug, name in DOCUMENTS.items()}
+
 logger = logging.getLogger("contracter.evaluation")
 
 
@@ -87,8 +91,8 @@ async def build_pipeline(
         llm_client=llm_client or LLMClient(base_url=config.OLLAMA_BASE_URL, model_name=config.OLLAMA_MODEL),
     )
 
-    for document_id, filename in DOCUMENTS.items():
-        source = SAMPLE_DIR / filename
+    for document_id, source in DOC_PATHS.items():
+        filename = source.name
         upload_dir = Path(config.UPLOAD_DIR) / document_id
         upload_dir.mkdir(parents=True, exist_ok=True)
         target = upload_dir / filename
@@ -151,10 +155,8 @@ async def evaluate(
         judge = LLMJudge(pipeline.llm_client) if use_judge else None
         evaluator = RAGEvaluator(judge=judge, embedder=embedder if use_judge else None)
 
-        chunks_by_document = {doc: pipeline.vector_store.fetch_all(doc) for doc in DOCUMENTS}
-        pages_by_document = {
-            doc: load_pages_safe(SAMPLE_DIR / filename) for doc, filename in DOCUMENTS.items()
-        }
+        chunks_by_document = {doc: pipeline.vector_store.fetch_all(doc) for doc in DOC_PATHS}
+        pages_by_document = {doc: load_pages_safe(path) for doc, path in DOC_PATHS.items()}
 
         report = await evaluator.evaluate(
             samples,
@@ -183,6 +185,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default="gemma3n:e4b", help="Ollama model for generation")
     parser.add_argument("--concurrency", type=int, default=1)
     parser.add_argument(
+        "--docs-map",
+        type=Path,
+        default=None,
+        help="JSON {slug: path} of documents to ingest (from scripts/prepare_cuad.py)",
+    )
+    parser.add_argument(
         "--out",
         type=Path,
         default=None,
@@ -190,6 +198,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args(argv)
+    if args.docs_map is not None:
+        import json as _json
+
+        DOC_PATHS.clear()
+        DOC_PATHS.update({k: Path(v) for k, v in _json.loads(args.docs_map.read_text()).items()})
 
     logging.basicConfig(
         level=logging.WARNING if args.quiet else logging.INFO,

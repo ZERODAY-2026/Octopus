@@ -5,6 +5,13 @@ from __future__ import annotations
 import logging
 import os
 from typing import Any
+
+# Fail closed: never let a library reach the network at run time. Models are
+# fetched only by scripts/setup_models.py (which unsets these variables).
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+
 import torch
 from sentence_transformers import SentenceTransformer
 
@@ -41,15 +48,12 @@ class EmbeddingEngine:
                 local_files_only=True,
             )
             logger.info("Loaded embedding model '%s' from local cache", self.model_name)
-        except Exception:
-            # If not yet downloaded, load normally (which downloads to standard huggingface cache)
-            logger.info("Model not found in local cache; downloading '%s'...", self.model_name)
-            self.model = SentenceTransformer(
-                self.model_name,
-                device=self.device,
-            )
-            # After successful download, ensure future huggingface calls default to local
-            os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        except Exception as err:
+            raise RuntimeError(
+                f"Embedding model '{self.model_name}' is not available locally and the app "
+                "never downloads models while running. Run `uv run python scripts/setup_models.py` "
+                "once (with network access), then start the app again."
+            ) from err
 
         if hasattr(self.model, "eval"):
             self.model.eval()

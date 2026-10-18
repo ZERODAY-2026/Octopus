@@ -317,6 +317,22 @@ class BackendApiClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def query_all(self, question: str, document_ids: list[str] | None) -> dict[str, Any]:
+        """Ask one question of several documents and get a verified per-document table."""
+        async with httpx.AsyncClient(base_url=self.base_url, timeout=600.0) as client:
+            resp = await client.post(
+                "/api/query-all", json={"question": question, "document_ids": document_ids}
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def get_document_details(self) -> list[dict[str, Any]]:
+        """Document ids with original filenames."""
+        async with httpx.AsyncClient(base_url=self.base_url, timeout=30.0) as client:
+            resp = await client.get("/api/documents-details")
+            resp.raise_for_status()
+            return resp.json()
+
     async def get_document_summary(self, document_id: str) -> dict[str, Any]:
         """Generate or retrieve a full structured summary of the specified document."""
         async with httpx.AsyncClient(base_url=self.base_url, timeout=180.0) as client:
@@ -564,6 +580,18 @@ def render_structured_result(data: dict[str, Any]) -> None:
                 "no specific omissions or silence noted."
             )
 
+    for flag in data.get("jurisdiction_flags") or []:
+        st.warning(f"Jurisdiction: {flag}")
+    if data.get("escalation"):
+        st.info(f"Suggested next step: {data['escalation']}")
+
+    excerpts = data.get("retrieved_excerpts") or []
+    if excerpts:
+        with st.expander(f"Evidence: the {len(excerpts)} excerpts the answer was based on"):
+            for i, ex in enumerate(excerpts, start=1):
+                st.markdown(f"**Excerpt {i}** - page {ex.get('page_number', '?')}")
+                st.code(ex.get("content", ""), language=None)
+
     # 4. Prominent Legal Disclaimer
     if disclaimer:
         st.markdown(
@@ -638,41 +666,45 @@ def render_sidebar() -> tuple[str | None, str | None]:
 
     # 3. Document Upload Section
     st.sidebar.markdown("### 📤 Upload Document")
-    uploaded_file = st.sidebar.file_uploader(
-        "Upload PDF or TXT contract",
+    uploaded_files = st.sidebar.file_uploader(
+        "Upload PDF or TXT contracts",
         type=["pdf", "txt"],
-        help="Upload standard legal contracts (.pdf or .txt) up to 50MB.",
+        accept_multiple_files=True,
+        help="Upload one or more contracts (.pdf or .txt) up to 50MB each.",
     )
 
-    if uploaded_file is not None:
+    if uploaded_files:
         if st.sidebar.button("🚀 Upload & Process", use_container_width=True):
-            with st.sidebar.status("Processing document...", expanded=True) as status:
-                st.write("Reading file bytes...")
-                file_bytes = uploaded_file.getvalue()
-                mime = uploaded_file.type or "application/octet-stream"
-
-                st.write("Sending to backend for chunking & indexing...")
-                try:
-                    result = run_async_call(
-                        api_client.upload_document(uploaded_file.name, file_bytes, mime)
-                    )
-                    doc_id = result.get("document_id", "unknown")
-                    num_pages = result.get("num_pages", 0)
-                    num_chunks = result.get("num_chunks", 0)
-                    status.update(label="Document Ingested Successfully!", state="complete", expanded=False)
-                    st.sidebar.success(
-                        f"**{uploaded_file.name}** ingested!\n"
-                        f"- Chunks: `{num_chunks}` | Pages: `{num_pages}`\n"
-                        f"- ID: `{doc_id}`"
-                    )
-                    st.session_state["selected_doc_id"] = doc_id
+            last_doc_id: str | None = None
+            failures: list[str] = []
+            with st.sidebar.status("Processing documents...", expanded=True) as status:
+                for uploaded_file in uploaded_files:
+                    st.write(f"Indexing {uploaded_file.name} ...")
+                    try:
+                        result = run_async_call(
+                            api_client.upload_document(
+                                uploaded_file.name,
+                                uploaded_file.getvalue(),
+                                uploaded_file.type or "application/octet-stream",
+                            )
+                        )
+                        last_doc_id = result.get("document_id", last_doc_id)
+                    except httpx.HTTPStatusError as e:
+                        failures.append(
+                            f"{uploaded_file.name}: backend error {e.response.status_code}: {e.response.text}")
+                    except Exception as e:
+                        failures.append(f"{uploaded_file.name}: {e}")
+                status.update(
+                    label="Done" if not failures else "Finished with errors",
+                    state="complete" if not failures else "error",
+                    expanded=bool(failures),
+                )
+            for message in failures:
+                st.sidebar.error(message)
+            if last_doc_id:
+                st.session_state["selected_doc_id"] = last_doc_id
+                if not failures:
                     st.rerun()
-                except httpx.HTTPStatusError as e:
-                    status.update(label="Upload Failed", state="error", expanded=True)
-                    st.sidebar.error(f"Backend error ({e.response.status_code}): {e.response.text}")
-                except Exception as e:
-                    status.update(label="Upload Failed", state="error", expanded=True)
-                    st.sidebar.error(f"Upload error: {e}")
 
     st.sidebar.markdown("---")
 
@@ -680,8 +712,11 @@ def render_sidebar() -> tuple[str | None, str | None]:
     st.sidebar.markdown("### 📚 Select Document")
     doc_options: list[dict[str, str]] = []
     try:
-        raw_docs = run_async_call(api_client.get_documents())
-        doc_options = normalize_documents_list(raw_docs)
+        try:
+            doc_options = normalize_documents_list(run_async_call(api_client.get_document_details()))
+        except Exception:
+            doc_options = normalize_documents_list(run_async_call(api_client.get_documents()))
+        st.session_state["all_doc_options"] = doc_options
     except Exception:
         doc_options = []
 
@@ -783,6 +818,51 @@ def render_tab_ask_questions(doc_id: str, doc_name: str) -> None:
         result_data = st.session_state[session_qa_key]
         st.markdown("---")
         render_structured_result(result_data)
+
+
+# ---------------------------------------------------------------------------
+# Tab: Across Documents
+# ---------------------------------------------------------------------------
+def render_tab_across_documents() -> None:
+    """Ask one question of many documents, e.g. 'Which contracts mention arbitration in New York?'."""
+    st.markdown("#### 🗂️ Ask Across Documents")
+    st.caption("Each document is checked separately; a 'yes' always comes with a verbatim quotation.")
+    options: list[dict[str, str]] = st.session_state.get("all_doc_options", [])
+    if len(options) < 2:
+        st.info("Upload two or more documents to ask questions across them.")
+        return
+    labels = {d["document_id"]: d["filename"] for d in options}
+    chosen = st.multiselect(
+        "Documents to check (empty = all)",
+        options=list(labels),
+        format_func=lambda i: labels[i],
+    )
+    question = st.text_input(
+        "Question for every selected document:",
+        placeholder="e.g., Does this contract require arbitration in New York?",
+        key="cross_question",
+    )
+    if st.button("🔍 Check documents", type="primary") and question.strip():
+        with st.spinner(f"Checking {len(chosen) or len(options)} document(s)..."):
+            try:
+                st.session_state["cross_result"] = run_async_call(
+                    api_client.query_all(question.strip(), chosen or None)
+                )
+            except Exception as e:
+                st.error(f"Cross-document query failed: {e}")
+    result = st.session_state.get("cross_result")
+    if result:
+        st.success(result.get("summary", ""))
+        icon = {"yes": "✅ Yes", "no": "❌ No", "unclear": "❔ Unclear"}
+        for row in result.get("rows", []):
+            with st.expander(f"{icon.get(row['verdict'], row['verdict'])} - {row['filename']}"):
+                if row.get("explanation"):
+                    st.write(row["explanation"])
+                ev = row.get("evidence")
+                if ev:
+                    st.markdown(f"Evidence (page {ev.get('page_number', '?')}):")
+                    st.code(ev.get("text", ""), language=None)
+        st.caption(result.get("disclaimer", DEFAULT_DISCLAIMER))
 
 
 # ---------------------------------------------------------------------------
@@ -993,7 +1073,9 @@ def main() -> None:
         )
 
     # Main Area Tabs
-    tab1, tab2, tab3 = st.tabs(["💬 Ask Questions", "📋 Document Summary", "⚡ Quick Analysis"])
+    tab1, tab2, tab3, tab4 = st.tabs(
+        ["💬 Ask Questions", "📋 Document Summary", "⚡ Quick Analysis", "🗂️ Across Documents"]
+    )
 
     with tab1:
         render_tab_ask_questions(selected_doc_id, selected_doc_name or selected_doc_id)
@@ -1004,6 +1086,8 @@ def main() -> None:
     with tab3:
         render_tab_quick_analysis(selected_doc_id, selected_doc_name or selected_doc_id)
 
+    with tab4:
+        render_tab_across_documents()
 
 if __name__ == "__main__":
     main()

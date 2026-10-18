@@ -20,7 +20,7 @@ from app.models import (
     DocumentSummary,
     QueryResponse,
     RetrievedChunk,
-    UploadResponse,
+    UploadResponse, CrossDocRow, CrossDocResponse, DocumentInfo,
 )
 from app.parsing.abstention import resolve_answer_status
 from app.parsing.citations import SourceSpan, snap_citation
@@ -30,8 +30,9 @@ from app.prompts.legal import (
     LEGAL_DISCLAIMER,
     QUERY_TEMPLATE,
     SUMMARY_TEMPLATE,
-    SYSTEM_PROMPT,
+    SYSTEM_PROMPT, CROSSDOC_TEMPLATE,
 )
+from app.retrieval import is_verdict_question, VERDICT_RESPONSE_PREFIX
 from app.vectorstore.store import VectorStore
 
 logger = logging.getLogger(__name__)
@@ -117,8 +118,6 @@ def _sanitize_answer_text(text: str) -> str:
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     cleaned = re.sub(r"[ \t]+([.,;!?])", r"\1", cleaned)
     return cleaned.strip()
-
-
 
 
 def _parse_llm_json(raw_text: str) -> dict[str, Any] | None:
@@ -344,6 +343,37 @@ def _snap_clause_citations(
     return anchored, rejected, dropped_clauses
 
 
+_GOVERNING_LAW_RE = re.compile(
+    r"governed by[^.]{0,60}?laws? of (?:the )?(?:State of |Commonwealth of )?([A-Z][A-Za-z]+(?: [A-Z][A-Za-z]+)?)",
+    re.IGNORECASE,
+)
+
+
+def _jurisdiction_flags(document_text: str) -> tuple[list[str], str]:
+    """Flag the governing law (if the text names one) and build a specific escalation."""
+    match = _GOVERNING_LAW_RE.search(re.sub(r"\s+", " ", document_text))
+    if not match:
+        return (
+            ["The document does not name a governing law; which jurisdiction's rules apply is unclear."],
+            "Ask a lawyer licensed where you live or operate which law would apply, and have them review this agreement.",
+        )
+    place = match.group(1).strip()
+    return (
+        [f"The document says it is governed by the law of {place}; whether a term is enforceable depends on that law and on the facts."],
+        f"Have a lawyer qualified in {place} law review the clauses you are relying on before you sign or act.",
+    )
+
+
+def _clean_query(question: str, unknown: list[str], document_text: str) -> str:
+    """Drop words of names that are not in the document so they do not skew search."""
+    vocab = set(re.findall(r"[a-z0-9]+", document_text.lower()))
+    cleaned = question
+    for phrase in unknown:
+        kept = [w for w in phrase.split() if re.sub(r"\W", "", w).lower() in vocab]
+        cleaned = cleaned.replace(phrase, " ".join(kept))
+    return cleaned
+
+
 class TriagePipeline:
     """Core RAG orchestration pipeline for legal document parsing, embedding, querying, and summarization."""
 
@@ -419,12 +449,16 @@ class TriagePipeline:
         Returns:
             QueryResponse with synthesized answer, classified clauses, citations, and disclaimer.
         """
+        document_text = self.vector_store.get_text(document_id)
+        unknown = unknown_entity_phrases(question, document_text)
         results = self.vector_store.query(
             document_id=document_id,
-            query_text=question,
+            query_text=_clean_query(question, unknown, document_text),
             n_results=self.config.TOP_K_RESULTS,
         )
-        return await self._synthesize(question=question, results=results)
+        return await self._synthesize(
+            question=question, results=results, document_text=document_text, unknown_entities=unknown
+        )
 
     def _to_retrieved_chunk(self, result: dict[str, Any]) -> RetrievedChunk:
         """Convert a raw vector-store hit into a validated RetrievedChunk.
@@ -498,16 +532,24 @@ class TriagePipeline:
         Returns:
             Tuple of (QueryResponse, ranked evidence chunks).
         """
+        document_text = self.vector_store.get_text(document_id)
+        unknown = unknown_entity_phrases(question, document_text)
         raw_results = self.vector_store.query(
             document_id=document_id,
-            query_text=question,
+            query_text=_clean_query(question, unknown, document_text),
             n_results=self.config.TOP_K_RESULTS,
         )
-        response = await self._synthesize(question=question, results=raw_results)
+        response = await self._synthesize(
+            question=question, results=raw_results, document_text=document_text, unknown_entities=unknown
+        )
         return response, [self._to_retrieved_chunk(item) for item in raw_results]
 
     async def _synthesize(
-        self, question: str, results: list[dict[str, Any]]
+        self,
+        question: str,
+        results: list[dict[str, Any]],
+        document_text: str = "",
+        unknown_entities: list[str] | None = None,
     ) -> QueryResponse:
         """Turn retrieved excerpts into a cited, disclaimer-bearing answer.
 
@@ -627,7 +669,22 @@ class TriagePipeline:
                 )
                 clauses = []
 
-            # Disclaimer is always the code constant — never model-supplied.
+            for name in unknown_entities or []:
+                uncertainty_notes.append(
+                    f"'{name}' does not appear exactly in this document, so the answer "
+                    "is based on the agreement actually uploaded; check that it is the one you mean."
+                )
+
+            verdict_declined = is_verdict_question(question)
+            jurisdiction_flags: list[str] = []
+            escalation = ""
+            if verdict_declined:
+                if not answer.startswith(VERDICT_RESPONSE_PREFIX):
+                    answer = VERDICT_RESPONSE_PREFIX + "Here is what the text itself says: " + answer
+                jurisdiction_flags, escalation = _jurisdiction_flags(document_text)
+
+            # The disclaimer is a constant: never accept one from model output,
+            # because a document can inject text that rewrites it.
             disclaimer = LEGAL_DISCLAIMER
 
             if _leaks_system_prompt(answer):
@@ -664,6 +721,72 @@ class TriagePipeline:
                 "Automated analysis note: Model returned unstructured output; structured clause parsing could not be verified.",
             ],
         )
+
+    def list_document_infos(self) -> list[DocumentInfo]:
+        """Document ids with their original filenames (for the UI selector)."""
+        return [
+            DocumentInfo(document_id=d, filename=self.vector_store.get_filename(d))
+            for d in self.list_documents()
+        ]
+
+    async def query_across_documents(
+            self, question: str, document_ids: list[str] | None = None
+    ) -> CrossDocResponse:
+        """Ask the same question of every selected document and tabulate verified answers.
+
+        Each document is judged separately from its own best excerpts, so a
+        document is reported "yes" only when a quotation that really occurs in
+        that document supports it. Documents are never ranked by similarity
+        alone, and the response states how many documents were checked.
+        """
+        ids = document_ids or self.list_documents()
+        rows: list[CrossDocRow] = []
+        for doc_id in ids:
+            filename = self.vector_store.get_filename(doc_id)
+            hits = self.vector_store.query(doc_id, question, n_results=4)
+            if not hits:
+                rows.append(CrossDocRow(document_id=doc_id, filename=filename, verdict="unclear",
+                                        explanation="No indexed text for this document."))
+                continue
+            context = "\n\n".join(
+                f"[EXCERPT {i}]\n{h['content']}" for i, h in enumerate(hits, start=1)
+            )
+            prompt = (
+                CROSSDOC_TEMPLATE.replace("{filename}", filename)
+                .replace("{context}", context)
+                .replace("{question}", question)
+            )
+            try:
+                raw = await self.llm_client.generate(prompt=prompt, system_prompt=SYSTEM_PROMPT, temperature=0.0)
+            except Exception as err:  # keep going: one failure must not hide the others
+                logger.error("Cross-document inference failed for %s: %s", doc_id, err)
+                rows.append(CrossDocRow(document_id=doc_id, filename=filename, verdict="unclear",
+                                        explanation="Local model call failed for this document."))
+                continue
+            parsed = _parse_llm_json(raw) or {}
+            verdict = str(parsed.get("verdict") or "unclear").strip().lower()
+            if verdict not in ("yes", "no", "unclear"):
+                verdict = "unclear"
+            evidence = None
+            quote = str(parsed.get("evidence_quote") or "").strip()
+            if quote:
+                match = snap_citation(quote, _spans_from_results(hits))
+                if match is not None:
+                    evidence = CitedPassage(text=match.text, page_number=match.page_number,
+                                            start_char=match.start_char, end_char=match.end_char)
+            if verdict == "yes" and evidence is None:
+                verdict = "unclear"  # a yes without a verifiable quote is not a finding
+            rows.append(CrossDocRow(
+                document_id=doc_id, filename=filename, verdict=verdict,
+                explanation=_sanitize_answer_text(str(parsed.get("explanation") or "")),
+                evidence=evidence,
+            ))
+        yes = [r.filename for r in rows if r.verdict == "yes"]
+        summary = (
+                f"Checked {len(rows)} document(s). Verified yes: {len(yes)}"
+                + (f" ({', '.join(yes)})." if yes else ".")
+        )
+        return CrossDocResponse(question=question, rows=rows, documents_checked=len(rows), summary=summary)
 
     async def summarize_document(self, document_id: str) -> DocumentSummary:
         """Generate a structured legal summary of the document and its key provisions.

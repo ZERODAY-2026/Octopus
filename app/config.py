@@ -34,6 +34,16 @@ class Settings(BaseSettings):
         default="gemma3n:e4b",
         description="Name of Ollama model to use for legal analysis",
     )
+    OLLAMA_NUM_CTX: int = Field(
+        default=8192,
+        description="Context window requested from Ollama (prevents silent prompt truncation)",
+        ge=2048,
+    )
+    OLLAMA_SEED: int = Field(default=42, description="Sampling seed for reproducible runs")
+    CORS_ORIGINS: list[str] = Field(
+        default=["http://localhost:8501", "http://127.0.0.1:8501"],
+        description="Origins allowed to call the API (the local Streamlit UI)",
+    )
     EMBEDDING_MODEL: str = Field(
         default="all-MiniLM-L6-v2",
         description="SentenceTransformer model name for document chunk embeddings",
@@ -49,7 +59,7 @@ class Settings(BaseSettings):
         ge=0,
     )
     TOP_K_RESULTS: int = Field(
-        default=5,
+        default=6,
         description="Number of top relevant chunks to retrieve from vector store",
         ge=1,
     )

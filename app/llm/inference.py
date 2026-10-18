@@ -85,8 +85,16 @@ class LLMClient:
             "model": self.model_name,
             "prompt": prompt,
             "stream": True,
+            # Ask Ollama to constrain output to valid JSON; the pipeline expects it.
+            "format": "json",
             "options": {
                 "temperature": temperature,
+                "top_p": 0.9,
+                "seed": settings.OLLAMA_SEED,
+                # Explicit window: Ollama's default is small and silently truncates
+                # long prompts (system prompt + excerpts), dropping evidence.
+                "num_ctx": settings.OLLAMA_NUM_CTX,
+                "num_predict": 1200,
             },
         }
 
@@ -115,6 +123,13 @@ class LLMClient:
                     accumulated_tokens.append(token)
 
                     if chunk_data.get("done", False):
+                        prompt_tokens = chunk_data.get("prompt_eval_count")
+                        if isinstance(prompt_tokens, int) and prompt_tokens >= settings.OLLAMA_NUM_CTX - 64:
+                            logger.warning(
+                                "Prompt used %d of %d context tokens; it may have been truncated",
+                                prompt_tokens,
+                                settings.OLLAMA_NUM_CTX,
+                            )
                         break
 
         except httpx.HTTPStatusError as err:

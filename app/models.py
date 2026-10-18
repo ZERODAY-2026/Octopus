@@ -99,6 +99,16 @@ class QueryResponse(BaseModel):
             "entirely silent (silent)"
         ),
     )
+    verdict_declined: bool = Field(
+        default=False,
+        description="True when the question asked for a legal verdict (enforceability, validity) that the tool refuses to give",
+    )
+    jurisdiction_flags: list[str] = Field(default_factory=list)
+    escalation: str = Field(default="", description="Specific advice on which professional to consult and why")
+    retrieved_excerpts: list[RetrievedChunk] = Field(
+        default_factory=list,
+        description="The excerpts the answer was generated from, for inspection",
+    )
     clauses: list[ClauseAnalysis] = Field(
         default_factory=list,
         description="Detailed breakdown of relevant legal clauses detected in context",
@@ -130,3 +140,35 @@ class DocumentSummary(BaseModel):
         default=DEFAULT_LEGAL_DISCLAIMER,
         description="Prominent legal disclaimer regarding automated analysis",
     )
+
+
+class CrossDocRequest(BaseModel):
+    """Question asked across several documents (null/empty ids = all documents)."""
+
+    question: str = Field(..., min_length=1)
+    document_ids: list[str] | None = None
+
+
+class CrossDocRow(BaseModel):
+    """One document's verified answer to a cross-document question."""
+
+    document_id: str
+    filename: str
+    verdict: Literal["yes", "no", "unclear"]
+    explanation: str = ""
+    evidence: CitedPassage | None = None
+
+
+class CrossDocResponse(BaseModel):
+    """Per-document table plus coverage, so nothing is silently skipped."""
+
+    question: str
+    rows: list[CrossDocRow]
+    documents_checked: int
+    summary: str
+    disclaimer: str = DEFAULT_LEGAL_DISCLAIMER
+
+
+class DocumentInfo(BaseModel):
+    document_id: str
+    filename: str

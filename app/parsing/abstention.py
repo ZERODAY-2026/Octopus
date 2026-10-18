@@ -161,6 +161,44 @@ def sentence_has_positive_content(sentence: str) -> bool:
     return False
 
 
+def _sentences(text: str) -> list[str]:
+    """Split text into sentences without breaking on section numbers like 8.1."""
+    return [s.strip() for s in _SENTENCE_SPLIT_RE.split(text or "") if s.strip()]
+
+
+def is_partial_answer(text: str) -> bool:
+    """Detect an answer that states something concrete and *then* notes a gap.
+
+    Example: "The agreement continues until either Party gives 30 days' notice.
+    The excerpts do not specify a fixed termination date." The leading sentence
+    is a positive finding; the trailing one only records what is missing. Such
+    an answer must keep its clause findings. A true refusal leads with the
+    refusal ("The document is silent on arbitration.").
+
+    Args:
+        text: Assistant answer text.
+
+    Returns:
+        True when the first sentence is not a refusal but a later one is.
+    """
+    sentences = _sentences(text)
+    if len(sentences) < 2:
+        return False
+    if _matches_marker(sentences[0]):
+        return False
+    return any(_matches_marker(s) for s in sentences[1:])
+
+
+def _matches_marker(sentence: str) -> bool:
+    normalized = normalize_for_marker_match(sentence)
+    return bool(normalized) and any(m in normalized for m in ABSTENTION_MARKERS)
+
+
+def is_full_abstention(text: str) -> bool:
+    """True only when the answer is a refusal rather than a partial answer."""
+    return is_abstention(text) and not is_partial_answer(text)
+
+
 def is_abstention(text: str) -> bool:
     """Detect whether a response is a *full* refusal for lack of evidence.
 

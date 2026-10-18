@@ -12,6 +12,9 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 from app.config import settings
 from app.models import (
+    CrossDocRequest,
+    CrossDocResponse,
+    DocumentInfo,
     DocumentSummary,
     QueryRequest,
     QueryResponse,
@@ -159,6 +162,26 @@ async def list_documents(
 ) -> list[str]:
     """List all ingested document IDs available for query and summarization."""
     return pipeline.list_documents()
+
+
+@router.get("/documents-details", response_model=list[DocumentInfo])
+async def list_document_details(
+    pipeline: TriagePipeline = Depends(get_pipeline),
+) -> list[DocumentInfo]:
+    """List documents with their original filenames."""
+    return pipeline.list_document_infos()
+
+
+@router.post("/query-all", response_model=CrossDocResponse)
+async def query_across_documents(
+    request: CrossDocRequest,
+    pipeline: TriagePipeline = Depends(get_pipeline),
+) -> CrossDocResponse:
+    """Ask one question of several (or all) documents; returns a verified per-document table."""
+    question = request.question.strip()
+    if not question:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Question must not be empty.")
+    return await pipeline.query_across_documents(question, request.document_ids)
 
 
 @router.get("/documents/{document_id}/summary", response_model=DocumentSummary)
