@@ -32,7 +32,7 @@ from app.prompts.legal import (
     SUMMARY_TEMPLATE,
     SYSTEM_PROMPT, CROSSDOC_TEMPLATE,
 )
-from app.retrieval import is_verdict_question, VERDICT_RESPONSE_PREFIX
+from app.retrieval import is_verdict_question, VERDICT_RESPONSE_PREFIX, unknown_entity_phrases
 from app.vectorstore.store import VectorStore
 
 logger = logging.getLogger(__name__)
