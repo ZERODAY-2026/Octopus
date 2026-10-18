@@ -83,6 +83,13 @@ class OfflineHashingEmbedder:
     and phrase overlap.
     """
 
+    #: Marks an embedder whose similarity is lexical rather than semantic.
+    #: Metrics that assume a sentence-transformer (notably RAGAS answer
+    #: relevancy, which embeds a generated question against the answer) read
+    #: this and report themselves as not gate-able instead of silently scoring
+    #: a synonym-free answer as irrelevant.
+    is_deterministic: bool = True
+
     def __init__(self, dimension: int = DEFAULT_DIMENSION, bigram_weight: float = 0.5) -> None:
         """Initialize the embedder.
 
