@@ -22,7 +22,9 @@ from app.models import (
     RetrievedChunk,
     UploadResponse,
 )
+from app.parsing.abstention import is_abstention
 from app.parsing.citations import SourceSpan, snap_citation
+from app.parsing.clauses import normalize_clause_types
 from app.parsing.extractor import extract_and_chunk
 from app.prompts.legal import (
     LEGAL_DISCLAIMER,
@@ -230,14 +232,15 @@ def _build_clause_analyses(raw_clauses: list[Any]) -> list[ClauseAnalysis]:
             str(item.get("plain_language_summary") or "").strip()
         )
 
-        clauses.append(
-            ClauseAnalysis(
-                clause_type=clause_type,
-                plain_language_summary=summary,
-                cited_passages=passages,
-                confidence=confidence,
+        for canonical_type in normalize_clause_types([clause_type]) or ["other"]:
+            clauses.append(
+                ClauseAnalysis(
+                    clause_type=canonical_type,
+                    plain_language_summary=summary,
+                    cited_passages=passages,
+                    confidence=confidence,
+                )
             )
-        )
     return clauses
 
 
@@ -601,6 +604,18 @@ class TriagePipeline:
                     f"{dropped_clauses} clause(s) could not be supported by any verifiable "
                     "quotation from the document and were not reported as findings."
                 )
+
+            if clauses and is_abstention(answer):
+                logger.info(
+                    "Withheld %d clause finding(s): the answer reports the document is silent",
+                    len(clauses),
+                )
+                uncertainty_notes.append(
+                    f"The excerpts do not answer this question, so the {len(clauses)} "
+                    "clause(s) the model detected nearby are not reported as findings; "
+                    "they concern other matters and must not be read as an answer."
+                )
+                clauses = []
 
             disclaimer = str(parsed.get("disclaimer") or LEGAL_DISCLAIMER)
 

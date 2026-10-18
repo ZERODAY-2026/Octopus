@@ -55,11 +55,12 @@ from app.evaluation.text import (
     longest_common_span_ratio,
     mean,
     ngrams,
-    normalize_for_match,
     sentences,
     token_set,
     tokenize,
 )
+from app.parsing.abstention import ABSTENTION_MARKERS as _ABSTENTION_MARKERS
+from app.parsing.abstention import is_abstention as _is_abstention
 
 logger = logging.getLogger(__name__)
 
@@ -78,37 +79,10 @@ LEXICAL_SUPPORT_BIGRAM_THRESHOLD: float = 0.34
 #: relevant in the lexical context-relevance judge.
 LEXICAL_CHUNK_RELEVANCE_THRESHOLD: float = 0.4
 
-#: Phrases that mark a calibrated refusal to answer.
-ABSTENTION_MARKERS: tuple[str, ...] = (
-    "silent on",
-    "is silent",
-    "does not address",
-    "do not address",
-    "not addressed",
-    "does not contain",
-    "do not contain",
-    "not contain",
-    "no provision",
-    "no explicit provision",
-    "does not specify",
-    "do not specify",
-    "not specified",
-    "does not state",
-    "not stated",
-    "insufficient information",
-    "insufficient evidence",
-    "cannot be determined",
-    "could not be determined",
-    "unable to determine",
-    "unable to answer",
-    "no relevant excerpt",
-    "no relevant provision",
-    "not found in the document",
-    "not present in the",
-    "document is empty",
-    "outside the scope",
-    "no information",
-)
+#: Phrases that mark a calibrated refusal to answer. Re-exported from
+#: :mod:`app.parsing.abstention` so the pipeline and the harness share exactly
+#: one definition.
+ABSTENTION_MARKERS: tuple[str, ...] = _ABSTENTION_MARKERS
 
 _YES_RE = re.compile(r"\byes\b", re.IGNORECASE)
 _NO_RE = re.compile(r"\bno\b", re.IGNORECASE)
@@ -156,16 +130,16 @@ class MetricResult:
 def is_abstention(text: str) -> bool:
     """Detect whether a response declines to answer for lack of evidence.
 
+    Thin re-export of :func:`app.parsing.abstention.is_abstention`, kept here so
+    the evaluation package remains a complete, self-describing surface.
+
     Args:
         text: Assistant answer text.
 
     Returns:
         True when a calibrated-uncertainty phrase is present.
     """
-    normalized = normalize_for_match(text)
-    if not normalized:
-        return False
-    return any(marker in normalized for marker in ABSTENTION_MARKERS)
+    return _is_abstention(text)
 
 
 def _parse_yes_no(raw: str) -> bool:
