@@ -1,0 +1,1 @@
+"""Contracter test suite."""

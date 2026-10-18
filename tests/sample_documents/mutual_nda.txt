@@ -1,0 +1,88 @@
+MUTUAL NON-DISCLOSURE AGREEMENT
+
+This Mutual Non-Disclosure Agreement (the "Agreement") is entered into as of
+March 14, 2026 (the "Effective Date") by and between Northwind Analytics, Inc., a
+Delaware corporation ("Northwind"), and Lumen Robotics Ltd., a company organized
+under the laws of England and Wales ("Lumen"). Northwind and Lumen are referred
+to individually as a "Party" and collectively as the "Parties".
+
+1. CONFIDENTIAL INFORMATION
+
+1.1 "Confidential Information" means any non-public information disclosed by one
+Party (the "Disclosing Party") to the other Party (the "Receiving Party"),
+whether orally, in writing, or by inspection of tangible objects, that is
+designated as confidential or that reasonably should be understood to be
+confidential given the nature of the information and the circumstances of
+disclosure.
+
+1.2 Confidential Information includes, without limitation, source code, model
+weights, training data schemas, product roadmaps, customer lists, pricing,
+financial projections, and the existence and terms of this Agreement.
+
+1.3 Confidential Information does not include information that: (a) is or becomes
+publicly available through no fault of the Receiving Party; (b) was lawfully in
+the Receiving Party's possession without a duty of confidentiality before
+receipt from the Disclosing Party; (c) is rightfully received from a third party
+without a duty of confidentiality; or (d) is independently developed by the
+Receiving Party without use of or reference to the Confidential Information.
+
+2. OBLIGATIONS OF THE RECEIVING PARTY
+
+2.1 The Receiving Party shall use the Confidential Information solely for the
+purpose of evaluating a potential commercial partnership between the Parties
+(the "Purpose").
+
+2.2 The Receiving Party shall protect the Confidential Information using at least
+the same degree of care it uses to protect its own confidential information of
+like importance, and in no event less than a reasonable degree of care.
+
+2.3 The Receiving Party shall not disclose Confidential Information to any third
+party without the prior written consent of the Disclosing Party, except to its
+employees, officers, and professional advisors who have a need to know for the
+Purpose and who are bound by confidentiality obligations at least as protective
+as those in this Agreement.
+
+2.4 The Receiving Party shall notify the Disclosing Party in writing within
+five (5) business days of discovering any unauthorized use or disclosure of
+Confidential Information.
+
+3. TERM AND TERMINATION
+
+3.1 This Agreement commences on the Effective Date and continues for a period of
+two (2) years, unless earlier terminated.
+
+3.2 Either Party may terminate this Agreement for convenience upon thirty (30)
+days' prior written notice to the other Party.
+
+3.3 Either Party may terminate this Agreement immediately upon written notice if
+the other Party materially breaches this Agreement and fails to cure such breach
+within fifteen (15) days after receiving written notice of the breach.
+
+3.4 The confidentiality obligations in Section 2 shall survive termination of
+this Agreement for a period of three (3) years following the date of termination.
+
+4. REMEDIES
+
+4.1 The Parties acknowledge that a breach of this Agreement may cause irreparable
+harm for which monetary damages would be an inadequate remedy, and that the
+non-breaching Party shall be entitled to seek injunctive relief in addition to
+all other remedies available at law or in equity.
+
+5. GENERAL PROVISIONS
+
+5.1 Neither Party grants the other any license, by implication or otherwise, to
+any patent, copyright, trademark, or trade secret, except the limited right to
+use the Confidential Information for the Purpose.
+
+5.2 This Agreement constitutes the entire agreement between the Parties with
+respect to its subject matter and supersedes all prior discussions.
+
+5.3 This Agreement shall be governed by and construed in accordance with the laws
+of the State of Delaware, without regard to its conflict of laws principles.
+
+5.4 Any dispute arising out of or relating to this Agreement shall be resolved by
+binding arbitration administered by the American Arbitration Association in
+Wilmington, Delaware.
+
+5.5 This Agreement may be amended only by a written instrument signed by both
+Parties. No waiver of any provision shall be effective unless in writing.
