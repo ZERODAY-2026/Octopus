@@ -323,6 +323,14 @@ def test_is_abstention_is_false_for_a_committal_answer() -> None:
     assert is_abstention("The notice period is thirty (30) days.") is False
 
 
+def test_is_abstention_is_false_for_partial_answer_with_silence_tail() -> None:
+    text = (
+        "remains in effect until terminated by either Party upon thirty (30) days' "
+        "prior written notice. The excerpts do not specify a fixed termination date."
+    )
+    assert is_abstention(text) is False
+
+
 def test_metric_result_serializes_with_rounded_score() -> None:
     payload = MetricResult("demo", 0.1234567, "lexical", {"k": 1}).to_dict()
     assert payload["score"] == 0.123457

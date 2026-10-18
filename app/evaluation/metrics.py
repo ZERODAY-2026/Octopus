@@ -61,6 +61,8 @@ from app.evaluation.text import (
 )
 from app.parsing.abstention import ABSTENTION_MARKERS as _ABSTENTION_MARKERS
 from app.parsing.abstention import is_abstention as _is_abstention
+from app.parsing.abstention import is_partial_abstention as _is_partial_abstention
+from app.parsing.abstention import resolve_answer_status as _resolve_answer_status
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +130,7 @@ class MetricResult:
 
 
 def is_abstention(text: str) -> bool:
-    """Detect whether a response declines to answer for lack of evidence.
+    """Detect whether a response is a *full* refusal for lack of evidence.
 
     Thin re-export of :func:`app.parsing.abstention.is_abstention`, kept here so
     the evaluation package remains a complete, self-describing surface.
@@ -137,9 +139,19 @@ def is_abstention(text: str) -> bool:
         text: Assistant answer text.
 
     Returns:
-        True when a calibrated-uncertainty phrase is present.
+        True when the whole answer is a calibrated refusal.
     """
     return _is_abstention(text)
+
+
+def is_partial_abstention(text: str) -> bool:
+    """Detect a mixed answer with both findings and an explicit silence note."""
+    return _is_partial_abstention(text)
+
+
+def resolve_answer_status(answer: str, model_status: str | None = None) -> str:
+    """Resolve answered / partial / silent for evaluation scoring."""
+    return _resolve_answer_status(answer, model_status=model_status)
 
 
 def _parse_yes_no(raw: str) -> bool:

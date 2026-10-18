@@ -6,10 +6,9 @@ guarantees are tested here:
 
 1. Every label is folded onto the canonical vocabulary, and a compound label
    becomes one finding per category — no category is lost inside a pipe.
-2. A finding is only reported when the answer is committal. If the model says
-   the document is silent, the clauses it noticed nearby are withheld, because
-   a clause finding is a claim about the document and must not be smuggled in
-   beside a refusal.
+2. A finding is withheld only when ``answer_status`` is ``silent`` (a full
+   refusal). Partial answers that both state a finding and note silence on
+   another point must keep their verified clauses.
 """
 
 from __future__ import annotations
@@ -159,9 +158,12 @@ def _responder(answer: str):
     def responder(prompt: str, system_prompt: str | None) -> str:
         excerpts = parse_excerpts(prompt)
         quote = first_sentence(excerpts[0]["text"]) if excerpts else "No excerpt."
+        from app.parsing.abstention import resolve_answer_status
+
         return json.dumps(
             {
                 "answer": answer,
+                "answer_status": resolve_answer_status(answer),
                 "clauses": [
                     {
                         "clause_type": "obligation | penalty",
@@ -204,5 +206,22 @@ def test_a_refusal_withholds_nearby_clause_findings(tmp_path) -> None:
 
     response = run_async(pipeline.query_document("nda", "What is the monetary penalty?"))
 
+    assert response.answer_status == "silent"
     assert response.clauses == []
     assert any("not reported as findings" in note for note in response.uncertainty_notes)
+
+
+def test_partial_answer_keeps_nearby_verified_clause_findings(tmp_path) -> None:
+    answer = (
+        "Shipper pays within 10 days. The contract does not contain a late-fee cap."
+    )
+    pipeline = make_pipeline(tmp_path, llm_client=ScriptedLLMClient(responder=_responder(answer)))
+    run_async(ingest_sample_document_async(pipeline, "nda", DOCUMENT))
+
+    response = run_async(pipeline.query_document("nda", "What penalties apply?"))
+
+    assert response.answer_status == "partial"
+    assert sorted(clause.clause_type for clause in response.clauses) == [
+        "obligation",
+        "penalty",
+    ]

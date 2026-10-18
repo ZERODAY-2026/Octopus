@@ -22,7 +22,7 @@ from app.models import (
     RetrievedChunk,
     UploadResponse,
 )
-from app.parsing.abstention import is_abstention
+from app.parsing.abstention import resolve_answer_status
 from app.parsing.citations import SourceSpan, snap_citation
 from app.parsing.clauses import normalize_clause_types
 from app.parsing.extractor import extract_and_chunk
@@ -521,6 +521,7 @@ class TriagePipeline:
         if not results:
             return QueryResponse(
                 answer="The document does not contain provisions addressing this inquiry, or the document is empty.",
+                answer_status="silent",
                 clauses=[],
                 disclaimer=LEGAL_DISCLAIMER,
                 uncertainty_notes=[
@@ -556,6 +557,7 @@ class TriagePipeline:
             logger.error("LLM inference failed for query: %s", err)
             return QueryResponse(
                 answer=f"Inference error: unable to contact local LLM ({err}).",
+                answer_status="silent",
                 clauses=[],
                 disclaimer=LEGAL_DISCLAIMER,
                 uncertainty_notes=[
@@ -586,9 +588,10 @@ class TriagePipeline:
 
             if rejected_quotes:
                 logger.warning(
-                    "Withheld %d citation(s) that could not be verified against the source: %s",
+                    "Withheld %d citation(s) that could not be verified against the source "
+                    "(count=%d; text redacted)",
                     len(rejected_quotes),
-                    rejected_quotes[:3],
+                    len(rejected_quotes),
                 )
                 uncertainty_notes.append(
                     f"{len(rejected_quotes)} quotation(s) returned by the model could not be "
@@ -605,9 +608,16 @@ class TriagePipeline:
                     "quotation from the document and were not reported as findings."
                 )
 
-            if clauses and is_abstention(answer):
+            answer_status = resolve_answer_status(
+                answer, model_status=parsed.get("answer_status")
+            )
+
+            # Withhold verified clauses only for a full silence. Partial answers
+            # (e.g. "X is Y. The excerpts do not specify Z.") must keep the
+            # clauses that support what the document does say.
+            if clauses and answer_status == "silent":
                 logger.info(
-                    "Withheld %d clause finding(s): the answer reports the document is silent",
+                    "Withheld %d clause finding(s): answer_status=silent",
                     len(clauses),
                 )
                 uncertainty_notes.append(
@@ -617,7 +627,8 @@ class TriagePipeline:
                 )
                 clauses = []
 
-            disclaimer = str(parsed.get("disclaimer") or LEGAL_DISCLAIMER)
+            # Disclaimer is always the code constant — never model-supplied.
+            disclaimer = LEGAL_DISCLAIMER
 
             if _leaks_system_prompt(answer):
                 logger.warning("Discarded an answer that echoed the system instructions")
@@ -626,6 +637,7 @@ class TriagePipeline:
                     "rather than analyse the document, so it was discarded. No summary "
                     "is provided for that request."
                 )
+                answer_status = "silent"
                 uncertainty_notes.append(
                     "The document contains text that tries to redirect the analysis "
                     "assistant; such instructions are treated as document content and "
@@ -634,6 +646,7 @@ class TriagePipeline:
 
             return QueryResponse(
                 answer=answer,
+                answer_status=answer_status,
                 clauses=clauses,
                 disclaimer=disclaimer,
                 uncertainty_notes=uncertainty_notes,
@@ -641,8 +654,10 @@ class TriagePipeline:
 
         # Fallback if LLM output could not be parsed as JSON
         logger.warning("LLM response did not contain valid JSON; falling back to plain text extraction")
+        fallback_answer = raw_response.strip()
         return QueryResponse(
-            answer=raw_response.strip(),
+            answer=fallback_answer,
+            answer_status=resolve_answer_status(fallback_answer),
             clauses=[],
             disclaimer=LEGAL_DISCLAIMER,
             uncertainty_notes=[
@@ -753,14 +768,13 @@ class TriagePipeline:
                     len(rejected_quotes),
                     dropped_clauses,
                 )
-            disclaimer = str(parsed.get("disclaimer") or LEGAL_DISCLAIMER)
 
             return DocumentSummary(
                 document_id=document_id,
                 filename=filename,
                 key_clauses=key_clauses,
                 overall_summary=overall_summary,
-                disclaimer=disclaimer,
+                disclaimer=LEGAL_DISCLAIMER,
             )
 
         # Fallback if unstructured text was returned

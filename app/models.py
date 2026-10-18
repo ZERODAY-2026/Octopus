@@ -91,6 +91,14 @@ class QueryResponse(BaseModel):
     """Complete response returned to the user for a legal query."""
 
     answer: str = Field(..., description="Synthesized plain-language answer to the user's question")
+    answer_status: Literal["answered", "partial", "silent"] = Field(
+        default="answered",
+        description=(
+            "Whether the document fully answers the question (answered), answers "
+            "part of it while remaining silent on another part (partial), or is "
+            "entirely silent (silent)"
+        ),
+    )
     clauses: list[ClauseAnalysis] = Field(
         default_factory=list,
         description="Detailed breakdown of relevant legal clauses detected in context",

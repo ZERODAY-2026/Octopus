@@ -460,56 +460,116 @@ def render_clause_card(clause: dict[str, Any], index: int) -> None:
 def render_structured_result(data: dict[str, Any]) -> None:
     """Render the full structured analysis: Answer, Clauses, Uncertainty Notes, and Disclaimer."""
     answer = data.get("answer", "")
+    answer_status = str(data.get("answer_status") or "answered").strip().lower()
     clauses = data.get("clauses") or data.get("key_clauses") or []
     uncertainty_notes = data.get("uncertainty_notes", [])
     disclaimer = data.get("disclaimer", DEFAULT_DISCLAIMER)
 
-    # 1. Plain language synthesis / answer
-    if answer:
-        st.markdown("#### 💡 Plain Language Synthesis")
-        st.markdown(f'<div class="answer-container">{html.escape(answer)}</div>', unsafe_allow_html=True)
+    status_labels = {
+        "answered": ("Answered", "The document covers this question."),
+        "partial": (
+            "Partial answer",
+            "The document answers part of the question and is silent on another part.",
+        ),
+        "silent": ("Document silent", "The document does not address this question."),
+    }
+    status_title, status_help = status_labels.get(
+        answer_status, status_labels["answered"]
+    )
+    st.caption(f"Answer status: **{status_title}** — {status_help}")
 
-    # 2. Key Clauses Breakdown
-    st.markdown(f"#### 📑 Identified Clauses ({len(clauses)})")
-    if clauses:
-        for idx, clause in enumerate(clauses):
-            render_clause_card(clause, idx)
-    else:
-        st.info("No specific contractual clauses were detected or extracted for this query.")
-
-    # 3. Uncertainty Notes / Silence Section
-    st.markdown("#### ⚠️ Document Silence & Uncertainty Notes")
-    if uncertainty_notes:
-        notes_list = "".join(f"<li>{html.escape(str(note))}</li>" for note in uncertainty_notes if str(note).strip())
-        if notes_list:
+    # Partial answers are rendered as two explicit parts so the silence note
+    # sits alongside the finding instead of replacing it.
+    if answer_status == "partial":
+        st.markdown("#### What the document says")
+        if answer:
             st.markdown(
-                f"""
-                <div class="uncertainty-box">
-                    <div class="uncertainty-title">⚠️ Matters the Document is Silent or Ambiguous On</div>
-                    <ul style="margin: 0; padding-left: 20px;">
-                        {notes_list}
-                    </ul>
-                </div>
-                """,
+                f'<div class="answer-container">{html.escape(answer)}</div>',
                 unsafe_allow_html=True,
             )
+        st.markdown(f"#### Identified clauses ({len(clauses)})")
+        if clauses:
+            for idx, clause in enumerate(clauses):
+                render_clause_card(clause, idx)
         else:
+            st.info("No verified contractual clauses were retained for this query.")
+
+        st.markdown("#### What the document does not say")
+        if uncertainty_notes:
+            notes_list = "".join(
+                f"<li>{html.escape(str(note))}</li>"
+                for note in uncertainty_notes
+                if str(note).strip()
+            )
+            if notes_list:
+                st.markdown(
+                    f"""
+                    <div class="uncertainty-box">
+                        <div class="uncertainty-title">Matters the document is silent or ambiguous on</div>
+                        <ul style="margin: 0; padding-left: 20px;">
+                            {notes_list}
+                        </ul>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.caption("No additional silence notes were recorded.")
+    else:
+        # 1. Plain language synthesis / answer
+        if answer:
+            st.markdown("#### Plain language synthesis")
             st.markdown(
-                '<p style="color: #64748b; font-size: 0.88rem;">ℹ️ The document explicitly covers the subject; no omissions noted.</p>',
+                f'<div class="answer-container">{html.escape(answer)}</div>',
                 unsafe_allow_html=True,
             )
-    else:
-        st.markdown(
-            '<p style="color: #64748b; font-size: 0.88rem;">ℹ️ The document explicitly addresses the queried points; no specific omissions or silence noted.</p>',
-            unsafe_allow_html=True,
-        )
+
+        # 2. Key Clauses Breakdown
+        st.markdown(f"#### Identified clauses ({len(clauses)})")
+        if clauses:
+            for idx, clause in enumerate(clauses):
+                render_clause_card(clause, idx)
+        else:
+            st.info(
+                "No specific contractual clauses were detected or extracted for this query."
+            )
+
+        # 3. Uncertainty Notes / Silence Section
+        st.markdown("#### Document silence and uncertainty notes")
+        if uncertainty_notes:
+            notes_list = "".join(
+                f"<li>{html.escape(str(note))}</li>"
+                for note in uncertainty_notes
+                if str(note).strip()
+            )
+            if notes_list:
+                st.markdown(
+                    f"""
+                    <div class="uncertainty-box">
+                        <div class="uncertainty-title">Matters the document is silent or ambiguous on</div>
+                        <ul style="margin: 0; padding-left: 20px;">
+                            {notes_list}
+                        </ul>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.caption(
+                    "The document explicitly covers the subject; no omissions noted."
+                )
+        else:
+            st.caption(
+                "The document explicitly addresses the queried points; "
+                "no specific omissions or silence noted."
+            )
 
     # 4. Prominent Legal Disclaimer
     if disclaimer:
         st.markdown(
             f"""
             <div class="disclaimer-footer">
-                ⚖️ <strong>Legal Notice:</strong> {html.escape(disclaimer)}
+                <strong>Legal notice:</strong> {html.escape(disclaimer)}
             </div>
             """,
             unsafe_allow_html=True,

@@ -477,6 +477,7 @@ class GroundedAnalysisLLM(ScriptedLLMClient):
         return json.dumps(
             {
                 "answer": answer,
+                "answer_status": "answered" if summaries else "silent",
                 "clauses": clauses,
                 "uncertainty_notes": [
                     "Notice delivery methods and any forum selection not stated above are not addressed by the document.",
@@ -499,6 +500,7 @@ class GroundedAnalysisLLM(ScriptedLLMClient):
                 "The retrieved excerpts are silent on this question; the document does "
                 "not address it, and no conclusion can be drawn."
             ),
+            "answer_status": "silent",
             "clauses": [],
             "uncertainty_notes": [
                 "The document is silent on this matter.",
@@ -621,6 +623,7 @@ class AbstainingAnalysisLLM(ScriptedLLMClient):
                         "The document is silent on this point: no provision in the retrieved "
                         "excerpts addresses it, so no conclusion is offered."
                     ),
+                    "answer_status": "silent",
                     "clauses": [],
                     "uncertainty_notes": ["The document is silent on this matter."],
                 }
@@ -635,6 +638,10 @@ class ConfabulatingAnalysisLLM(ScriptedLLMClient):
     to unanswerable questions, which is the single most dangerous failure mode
     for a legal triage tool.
     """
+
+    def __init__(self) -> None:
+        """Register the confabulating responder (was previously never wired)."""
+        super().__init__(responder=self._respond)
 
     def _respond(self, prompt: str, system_prompt: str | None) -> str:
         """Always answer, inventing a provision when the excerpts are unhelpful.
@@ -673,6 +680,7 @@ class ConfabulatingAnalysisLLM(ScriptedLLMClient):
                 "The agreement imposes a fifty thousand dollar ($50,000) fee for the matter raised."
             )
         payload["uncertainty_notes"] = []
+        payload["answer_status"] = "answered"
         return json.dumps(payload)
 
 

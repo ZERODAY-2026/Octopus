@@ -151,6 +151,7 @@ class EvalPrediction(BaseModel):
     """
 
     answer: str = ""
+    answer_status: str = ""
     contexts: list[str] = Field(default_factory=list)
     retrieved_chunk_ids: list[str] = Field(default_factory=list)
     clause_types: list[str] = Field(default_factory=list)
@@ -225,6 +226,7 @@ class PipelineAnswerProvider:
 
         return EvalPrediction(
             answer=response.answer,
+            answer_status=getattr(response, "answer_status", "") or "",
             contexts=[chunk.content for chunk in chunks],
             retrieved_chunk_ids=[chunk.chunk_id for chunk in chunks],
             clause_types=clause_types,
@@ -489,13 +491,33 @@ class RAGEvaluator:
                 result.details["produced_clause_types"] = sorted(produced)
 
             # Calibrated uncertainty in reverse: answering an answerable question.
-            result.metrics["over_abstention_rate"] = (
-                1.0 if is_abstention(prediction.answer) else 0.0
+            # Prefer answer_status when present; fall back to sentence-level is_abstention.
+            status = (prediction.answer_status or "").strip().lower()
+            over_abstained = (
+                status == "silent"
+                if status in {"answered", "partial", "silent"}
+                else is_abstention(prediction.answer)
             )
+            result.metrics["over_abstention_rate"] = 1.0 if over_abstained else 0.0
+
+            # Partial answers must retain at least one verified clause when the
+            # model surfaced any — target retention rate is 1.0.
+            if status == "partial":
+                result.metrics["partial_answer_clause_retention_rate"] = (
+                    1.0 if prediction.clause_types else 0.0
+                )
 
         # --- Unanswerable cases: calibrated abstention --------------------
         else:
-            abstained = is_abstention(prediction.answer)
+            # Silence tests expect a full refusal. Prefer answer_status when
+            # present; otherwise fall back to sentence-level is_abstention.
+            status = (prediction.answer_status or "").strip().lower()
+            if status == "silent":
+                abstained = True
+            elif status in {"answered", "partial"}:
+                abstained = False
+            else:
+                abstained = is_abstention(prediction.answer)
             notes_mention_silence = any(
                 is_abstention(note) for note in prediction.uncertainty_notes
             )
@@ -509,6 +531,7 @@ class RAGEvaluator:
             )
             result.details["abstained"] = abstained
             result.details["silence_noted"] = notes_mention_silence
+            result.details["answer_status"] = status or None
 
         # --- Citation verification (always applicable) --------------------
         if prediction.cited_passages:
