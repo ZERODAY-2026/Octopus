@@ -123,8 +123,8 @@ def _sanitize_answer_text(text: str) -> str:
 def _parse_llm_json(raw_text: str) -> dict[str, Any] | None:
     """Safely extract and parse JSON object from LLM response text.
 
-    Handles raw JSON, markdown-wrapped JSON code blocks, and responses
-    with leading/trailing explanatory text.
+    Handles raw JSON, markdown-wrapped JSON code blocks, responses
+    with leading/trailing explanatory text, and trailing commas.
 
     Args:
         raw_text: Raw string output from LLM.
@@ -137,35 +137,37 @@ def _parse_llm_json(raw_text: str) -> dict[str, Any] | None:
 
     cleaned = raw_text.strip()
 
-    # 1. Direct JSON parse
-    try:
-        data = json.loads(cleaned)
-        if isinstance(data, dict):
-            return data
-    except Exception:
-        pass
-
-    # 2. Extract markdown fenced code block: ```json ... ``` or ``` ... ```
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, re.DOTALL)
-    if match:
+    def _load_json_lenient(text_to_parse: str) -> dict[str, Any] | None:
+        """Strips trailing commas before brackets/braces and parses JSON."""
+        sanitized = re.sub(r",(\s*[}\]])", r"\1", text_to_parse)
         try:
-            data = json.loads(match.group(1))
+            data = json.loads(sanitized)
             if isinstance(data, dict):
                 return data
         except Exception:
             pass
+        return None
+
+    # 1. Direct JSON parse
+    result = _load_json_lenient(cleaned)
+    if result is not None:
+        return result
+
+    # 2. Extract markdown fenced code block: ```json ... ``` or ``` ... ```
+    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, re.DOTALL)
+    if match:
+        result = _load_json_lenient(match.group(1))
+        if result is not None:
+            return result
 
     # 3. Search for outermost matching braces
     start = cleaned.find("{")
     end = cleaned.rfind("}")
     if start != -1 and end != -1 and end > start:
         candidate = cleaned[start : end + 1]
-        try:
-            data = json.loads(candidate)
-            if isinstance(data, dict):
-                return data
-        except Exception:
-            pass
+        result = _load_json_lenient(candidate)
+        if result is not None:
+            return result
 
     return None
 

@@ -443,7 +443,8 @@ def render_clause_card(clause: dict[str, Any], index: int) -> None:
 
         st.markdown("**Plain Language Summary:**")
         if summary:
-            st.markdown(f"> {html.escape(summary)}")
+            # Native Streamlit info box preserves Markdown formatting
+            st.info(summary)
         else:
             st.caption("No plain language summary provided.")
 
@@ -455,6 +456,7 @@ def render_clause_card(clause: dict[str, Any], index: int) -> None:
                 start_c = cit.get("start_char", 0)
                 end_c = cit.get("end_char", 0)
 
+                # HTML escaping is retained ONLY for verbatim raw text citations to prevent injection
                 escaped_text = html.escape(cit_text).replace("\n", "<br>")
                 st.markdown(
                     f"""
@@ -471,7 +473,6 @@ def render_clause_card(clause: dict[str, Any], index: int) -> None:
                 )
         else:
             st.caption("No verbatim citation passages recorded for this clause.")
-
 
 def render_structured_result(data: dict[str, Any]) -> None:
     """Render the full structured analysis: Answer, Clauses, Uncertainty Notes, and Disclaimer."""
@@ -494,15 +495,12 @@ def render_structured_result(data: dict[str, Any]) -> None:
     )
     st.caption(f"Answer status: **{status_title}** — {status_help}")
 
-    # Partial answers are rendered as two explicit parts so the silence note
-    # sits alongside the finding instead of replacing it.
     if answer_status == "partial":
         st.markdown("#### What the document says")
         if answer:
-            st.markdown(
-                f'<div class="answer-container">{html.escape(answer)}</div>',
-                unsafe_allow_html=True,
-            )
+            # Replaced html.escape and raw div with a native Markdown container
+            with st.container(border=True):
+                st.markdown(answer)
         st.markdown(f"#### Identified clauses ({len(clauses)})")
         if clauses:
             for idx, clause in enumerate(clauses):
@@ -532,15 +530,12 @@ def render_structured_result(data: dict[str, Any]) -> None:
         else:
             st.caption("No additional silence notes were recorded.")
     else:
-        # 1. Plain language synthesis / answer
         if answer:
             st.markdown("#### Plain language synthesis")
-            st.markdown(
-                f'<div class="answer-container">{html.escape(answer)}</div>',
-                unsafe_allow_html=True,
-            )
+            # Replaced html.escape and raw div with a native Markdown container
+            with st.container(border=True):
+                st.markdown(answer)
 
-        # 2. Key Clauses Breakdown
         st.markdown(f"#### Identified clauses ({len(clauses)})")
         if clauses:
             for idx, clause in enumerate(clauses):
@@ -550,7 +545,6 @@ def render_structured_result(data: dict[str, Any]) -> None:
                 "No specific contractual clauses were detected or extracted for this query."
             )
 
-        # 3. Uncertainty Notes / Silence Section
         st.markdown("#### Document silence and uncertainty notes")
         if uncertainty_notes:
             notes_list = "".join(
@@ -592,7 +586,6 @@ def render_structured_result(data: dict[str, Any]) -> None:
                 st.markdown(f"**Excerpt {i}** - page {ex.get('page_number', '?')}")
                 st.code(ex.get("content", ""), language=None)
 
-    # 4. Prominent Legal Disclaimer
     if disclaimer:
         st.markdown(
             f"""
@@ -789,35 +782,42 @@ def render_tab_ask_questions(doc_id: str, doc_name: str) -> None:
     st.markdown("#### 💬 Ask Questions About This Contract")
     st.caption("Ask specific legal or contractual questions. Every answer cites verbatim passages.")
 
-    user_question = st.text_input(
-        "Enter your question:",
-        placeholder="e.g., What are the confidentiality obligations and exceptions under this agreement?",
-        key="qa_question_input",
-    )
+    # Initialize a session state list specifically for tracking the document's chat history
+    history_key = f"chat_history_{doc_id}"
+    if history_key not in st.session_state:
+        st.session_state[history_key] = []
 
-    col_btn, _ = st.columns([1, 4])
-    with col_btn:
-        submit_btn = st.button("🔍 Submit Question", type="primary", use_container_width=True)
+    # Render previous conversation history loops
+    for chat in st.session_state[history_key]:
+        with st.chat_message("user"):
+            st.write(chat["question"])
+        with st.chat_message("assistant"):
+            render_structured_result(chat["response"])
 
-    session_qa_key = f"qa_result_{doc_id}"
+    # Replaced static text input and button with a persistent chat input
+    user_question = st.chat_input("Enter your question, e.g., What are the confidentiality exceptions?")
 
-    if submit_btn and user_question.strip():
-        with st.spinner("Analyzing contract chunks & extracting cited clauses..."):
-            try:
-                response = run_async_call(api_client.query_document(doc_id, user_question.strip()))
-                st.session_state[session_qa_key] = response
-            except httpx.HTTPStatusError as e:
-                st.error(f"Backend returned error {e.response.status_code}: {e.response.text}")
-            except httpx.ConnectError:
-                st.error("Cannot connect to backend at http://127.0.0.1:8000. Is the FastAPI server running?")
-            except Exception as e:
-                st.error(f"Query analysis failed: {e}")
+    if user_question:
+        with st.chat_message("user"):
+            st.write(user_question)
 
-    # Display results if present
-    if session_qa_key in st.session_state:
-        result_data = st.session_state[session_qa_key]
-        st.markdown("---")
-        render_structured_result(result_data)
+        with st.chat_message("assistant"):
+            with st.spinner("Analyzing contract chunks & extracting cited clauses..."):
+                try:
+                    response = run_async_call(api_client.query_document(doc_id, user_question.strip()))
+                    render_structured_result(response)
+
+                    # Append the exchange to the active document's history state
+                    st.session_state[history_key].append({
+                        "question": user_question.strip(),
+                        "response": response
+                    })
+                except httpx.HTTPStatusError as e:
+                    st.error(f"Backend returned error {e.response.status_code}: {e.response.text}")
+                except httpx.ConnectError:
+                    st.error("Cannot connect to backend at http://127.0.0.1:8000. Is the FastAPI server running?")
+                except Exception as e:
+                    st.error(f"Query analysis failed: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -894,7 +894,9 @@ def render_tab_document_summary(doc_id: str, doc_name: str) -> None:
         overall = sum_data.get("overall_summary", "")
         if overall:
             st.markdown("#### 📖 Executive Summary")
-            st.markdown(f'<div class="answer-container">{html.escape(overall)}</div>', unsafe_allow_html=True)
+            # Replaced html.escape and raw div with a native Markdown container
+            with st.container(border=True):
+                st.markdown(overall)
 
         key_clauses = sum_data.get("key_clauses", [])
         st.markdown(f"#### 🔑 Classified Key Clauses ({len(key_clauses)})")

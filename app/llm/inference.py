@@ -94,7 +94,7 @@ class LLMClient:
                 # Explicit window: Ollama's default is small and silently truncates
                 # long prompts (system prompt + excerpts), dropping evidence.
                 "num_ctx": settings.OLLAMA_NUM_CTX,
-                "num_predict": 1200,
+                "num_predict": -1,
             },
         }
 
