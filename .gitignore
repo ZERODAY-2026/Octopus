@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Data (user uploads and vector DB are local-only, never commit)
+data/uploads/
+data/chroma_db/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Generated test fixtures (rebuilt from the committed .txt sources)
+tests/sample_documents/generated/
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
